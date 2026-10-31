@@ -1,0 +1,11 @@
+name = "xtorin-ai-cloud"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# 10 requests per minute per source IP (approximate Cloudflare rate limit).
+# Set GROQ_API_KEY with: npx wrangler secret put GROQ_API_KEY
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }
