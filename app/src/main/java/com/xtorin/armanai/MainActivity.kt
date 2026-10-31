@@ -116,69 +116,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val endpoint = prefs.getString("ai_endpoint","").orEmpty().trim()
         val model = prefs.getString("ai_model","").orEmpty().trim()
         val command = value.lowercase(Locale.ROOT)
-        val offline = command in listOf("help","time","date","memories","projects","history","settings","new chat","voice") ||
+        val offline = command in listOf("help","time","date","memories","projects","history","settings","new chat","voice","/learned","/random learn","/randomlearn") ||
             listOf("remember ","recall ","clear memory ","teach ","define ","relate ").any { command.startsWith(it) }
-        if(command.startsWith("/research ") || command.startsWith("/learn ")) {
-            val learning = command.startsWith("/learn ")
-            val topic = value.substringAfter(" ").trim()
-            if(topic.isEmpty()) { addMessage("Use /research TOPIC or /learn TOPIC",false); return }
-            val requestChatId = chatId
-            addMessage("Researching Wikipedia…",false)
-            Thread {
-                val result = try { WebKnowledge.wikipedia(topic) } catch (_:Exception) { null }
-                val answer = if(result == null)
-                    "No Wikipedia summary found. Search manually: " + WebKnowledge.googleSearchUrl(topic)
-                else {
-                    if(learning) {
-                        synchronized(prefs) {
-                            val graph = conceptGraph()
-                            ConceptMemory.define(graph,topic,result.summary + "\\nSource: " + result.source)
-                            prefs.edit().putString("concept_graph",graph.toString()).apply()
-                        }
-                    }
-                    (if(learning) "Saved locally.\\n" else "") +
-                        result.title + ": " + result.summary + "\\nSource: " + result.source +
-                        "\\nMore sources (search links, not automatically read):" +
-                        "\\nGoogle: " + WebKnowledge.googleSearchUrl(topic) +
-                        "\\nReddit: https://www.reddit.com/search/?q=" + java.net.URLEncoder.encode(topic,"UTF-8") +
-                        "\\nGitHub: https://github.com/search?q=" + java.net.URLEncoder.encode(topic,"UTF-8")
-                }
-                runOnUiThread {
-                    val arr = try { JSONArray(prefs.getString("chat_$requestChatId","[]")) } catch (_:Exception) { JSONArray() }
-                    if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Researching Wikipedia…") arr.remove(arr.length()-1)
-                    arr.put(JSONObject().put("text",answer).put("user",false))
-                    prefs.edit().putString("chat_$requestChatId",arr.toString()).apply()
-                    if(chatId==requestChatId) showChat()
-                }
-            }.start()
+        if(command=="/random learn" || command=="/randomlearn") {
+            val topics=listOf("Solar System","Cell biology","Ancient Egypt","Computer science","Photosynthesis","Ocean","Mathematics","World Wide Web","Evolution","Music theory","Geology","History of astronomy")
+            val topic=topics.random()
+            researchTopic(topic,true)
             return
         }
+        if(command=="/learned") { showLearned(); return }
         if(command.startsWith("/research ") || command.startsWith("/learn ")) {
-            val learning = command.startsWith("/learn ")
-            val topic = value.substring(if(learning) 7 else 10).trim()
-            if(topic.isEmpty()) { addMessage("Provide a topic after the command.",false); return }
-            val requestChatId = chatId
-            addMessage("Researching public Wikipedia information…",false)
-            Thread {
-                val found = try { WebKnowledge.wikipedia(topic) } catch (_:Exception) { null }
-                val answer = if(found==null) "No Wikipedia summary found. Try another topic or search Google: " +
-                    WebKnowledge.googleSearchUrl(topic)
-                else {
-                    if(learning) {
-                        val key = "research_" + topic.lowercase(Locale.ROOT).take(100)
-                        prefs.edit().putString(key,found.summary + "\\nSource: " + found.source).apply()
-                    }
-                    found.title + ": " + found.summary + "\\nSource: " + found.source +
-                        (if(learning) "\\nSaved locally for later reference." else "")
-                }
-                runOnUiThread {
-                    val arr = try { JSONArray(prefs.getString("chat_$requestChatId","[]")) } catch (_:Exception) { JSONArray() }
-                    if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Researching public Wikipedia information…") arr.remove(arr.length()-1)
-                    arr.put(JSONObject().put("text",answer).put("user",false))
-                    prefs.edit().putString("chat_$requestChatId",arr.toString()).apply()
-                    if(chatId==requestChatId) showChat()
-                }
-            }.start()
+            val learning=command.startsWith("/learn ")
+            researchTopic(value.substringAfter(" ").trim(),learning)
             return
         }
         if(command.startsWith("/recall ")) {
@@ -219,6 +168,54 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             if(prefs.getBoolean("speak",false)) tts?.speak(answer,TextToSpeech.QUEUE_FLUSH,null,"xtorin")
         }
     }
+    private fun researchTopic(topic:String, save:Boolean) {
+        if(topic.isBlank()) { addMessage("Use /research TOPIC or /learn TOPIC",false); return }
+        val requestChatId=chatId
+        addMessage("Researching Wikipedia…",false)
+        Thread {
+            val found=try { WebKnowledge.wikipedia(topic) } catch (_:Exception) { null }
+            val answer=if(found==null) "No Wikipedia summary found. Google search: "+WebKnowledge.googleSearchUrl(topic)
+            else {
+                if(save) {
+                    synchronized(prefs) {
+                        val graph=conceptGraph()
+                        ConceptMemory.define(graph,found.title,found.summary)
+                        prefs.edit().putString("concept_graph",graph.toString())
+                            .putString("research_"+found.title.lowercase(Locale.ROOT).take(100),
+                                found.summary+"\\nSource: "+found.source).apply()
+                    }
+                }
+                found.title+": "+found.summary+"\\nSource: "+found.source+
+                    (if(save) "\\nSaved locally." else "")+
+                    "\\nGoogle: "+WebKnowledge.googleSearchUrl(topic)
+            }
+            runOnUiThread {
+                val arr=try { JSONArray(prefs.getString("chat_$requestChatId","[]")) } catch (_:Exception) { JSONArray() }
+                if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Researching Wikipedia…") arr.remove(arr.length()-1)
+                arr.put(JSONObject().put("text",answer).put("user",false))
+                prefs.edit().putString("chat_$requestChatId",arr.toString()).apply()
+                if(chatId==requestChatId) showChat()
+            }
+        }.start()
+    }
+    private fun showLearned() {
+        screen("Learned knowledge")
+        val list=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+        val scrollView=ScrollView(this); scrollView.addView(list)
+        root.addView(scrollView,LinearLayout.LayoutParams(-1,0,1f))
+        val graph=conceptGraph().optJSONObject("concepts") ?: JSONObject()
+        val names=graph.keys().asSequence().toList().sorted()
+        list.addView(text("Stored concepts: "+names.size+" • Taught examples: "+learnedExamples().length(),13f,Color.LTGRAY))
+        if(names.isEmpty()) list.addView(text("No concepts saved yet. Use /learn TOPIC."))
+        names.forEach { name ->
+            list.addView(button(name) {
+                info(name,graph.optString(name)+"\\n\\nSource information is saved only when imported from research.")
+            })
+        }
+        list.addView(button("Learn a random topic") { showChat(); researchTopic(
+            listOf("Solar System","Cell biology","Ancient Egypt","Computer science","Photosynthesis","Ocean").random(),true)
+        })
+    }
     private fun newChat() {
         chatId = UUID.randomUUID().toString()
         prefs.edit().putString("active_chat",chatId).apply()
@@ -237,6 +234,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         entry("💬 Current chat") { showChat() }
         entry("🕘 Previous chats") { showHistory() }
         entry("📁 Projects") { showProjects() }
+        entry("📚 Learned knowledge") { showLearned() }
         entry("🖼 Media library") { showMedia() }
         entry("⌨ XCode") { showCode() }
         entry("🧠 Expert mode") { info("Expert mode",if(prefs.getString("ai_endpoint","").isNullOrBlank()) "Configure a compatible AI provider in Settings." else "Your configured AI model is available through Chat.") }
