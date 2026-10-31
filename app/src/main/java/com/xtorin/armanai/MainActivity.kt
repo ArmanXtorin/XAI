@@ -29,7 +29,7 @@ class MainActivity : Activity() {
         val title = TextView(this).apply { text = "◈  Xtorin AI"; textSize = 26f; setTextColor(accent); setTypeface(null, Typeface.BOLD) }
         val subtitle = TextView(this).apply { text = "MOBILE  •  LOCAL MODE  •  v0.1"; textSize = 11f; setTextColor(Color.LTGRAY); setPadding(0, 0, 0, 18) }
         root.addView(title); root.addView(subtitle)
-        val scroll = ScrollView(this).apply { fillViewport = true }
+        val scroll = ScrollView(this).apply { isFillViewport = true }
         transcript = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll.addView(transcript)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
