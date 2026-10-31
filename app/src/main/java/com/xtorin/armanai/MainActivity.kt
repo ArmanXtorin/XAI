@@ -153,6 +153,39 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }.start()
             return
         }
+        if(command.startsWith("/research ") || command.startsWith("/learn ")) {
+            val learning = command.startsWith("/learn ")
+            val topic = value.substring(if(learning) 7 else 10).trim()
+            if(topic.isEmpty()) { addMessage("Provide a topic after the command.",false); return }
+            val requestChatId = chatId
+            addMessage("Researching public Wikipedia information…",false)
+            Thread {
+                val found = try { WebKnowledge.wikipedia(topic) } catch (_:Exception) { null }
+                val answer = if(found==null) "No Wikipedia summary found. Try another topic or search Google: " +
+                    WebKnowledge.googleSearchUrl(topic)
+                else {
+                    if(learning) {
+                        val key = "research_" + topic.lowercase(Locale.ROOT).take(100)
+                        prefs.edit().putString(key,found.summary + "\\nSource: " + found.source).apply()
+                    }
+                    found.title + ": " + found.summary + "\\nSource: " + found.source +
+                        (if(learning) "\\nSaved locally for later reference." else "")
+                }
+                runOnUiThread {
+                    val arr = try { JSONArray(prefs.getString("chat_$requestChatId","[]")) } catch (_:Exception) { JSONArray() }
+                    if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Researching public Wikipedia information…") arr.remove(arr.length()-1)
+                    arr.put(JSONObject().put("text",answer).put("user",false))
+                    prefs.edit().putString("chat_$requestChatId",arr.toString()).apply()
+                    if(chatId==requestChatId) showChat()
+                }
+            }.start()
+            return
+        }
+        if(command.startsWith("/recall ")) {
+            val topic=value.substring(8).trim().lowercase(Locale.ROOT).take(100)
+            addMessage(prefs.getString("research_"+topic,null) ?: "Nothing saved for that topic yet.",false)
+            return
+        }
         if(endpoint.isNotEmpty() && model.isNotEmpty() && !offline) {
             val requestChatId = chatId
             val snapshot = JSONArray(messages().toString())
