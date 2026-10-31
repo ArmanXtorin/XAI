@@ -38,7 +38,7 @@ object WebKnowledge {
             "GitHub: https://github.com/search?q=$q",
             "Instagram: https://www.google.com/search?q=site%3Ainstagram.com+$q",
             "Telegram: https://www.google.com/search?q=site%3At.me+$q"
-        ).joinToString("\\n")
+        ).joinToString("\n")
     }
 
     private fun getJson(address: String): JSONObject? {
