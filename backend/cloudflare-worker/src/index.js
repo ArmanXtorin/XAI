@@ -8,7 +8,17 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     if (new URL(request.url).pathname !== "/v1/chat/completions" || request.method !== "POST")
       return json({ error: "Not found" }, 404, cors);
-    if (!env.GROQ_API_KEY) return json({ error: "Backend not configured" }, 503, cors);
+    if (!env.GROQ_API_KEY || !env.RATE_LIMITER)
+      return json({ error: "Backend not configured or protected" }, 503, cors);
+    // Cloudflare Workers rate-limit binding. Fail closed if unavailable.
+    const ip = request.headers.get("CF-Connecting-IP");
+    if (!ip) return json({ error: "Client identity unavailable" }, 403, cors);
+    try {
+      const { success } = await env.RATE_LIMITER.limit({ key: ip });
+      if (!success) return json({ error: "Too many requests" }, 429, { ...cors, "Retry-After": "60" });
+    } catch {
+      return json({ error: "Rate limiter unavailable" }, 503, cors);
+    }
     const length = Number(request.headers.get("content-length") || 0);
     if (length > 32000) return json({ error: "Request too large" }, 413, cors);
     let body;
