@@ -1,55 +1,86 @@
+// XAI Cloud prototype: Cloudflare-native model, no third-party API key.
+// Keep Cloudflare Access set to ALL traffic until public abuse controls exist.
+const MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+const HEADERS = {
+  "Content-Type": "application/json; charset=utf-8",
+  "Cache-Control": "no-store",
+};
+function json(data, status = 200, extra = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...HEADERS, ...extra },
+  });
+}
 export default {
   async fetch(request, env) {
-    const cors = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-    };
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
-    if (new URL(request.url).pathname !== "/v1/chat/completions" || request.method !== "POST")
-      return json({ error: "Not found" }, 404, cors);
-    if (!env.GROQ_API_KEY || !env.RATE_LIMITER)
-      return json({ error: "Backend not configured or protected" }, 503, cors);
-    // Cloudflare Workers rate-limit binding. Fail closed if unavailable.
+    const url = new URL(request.url);
+    if (url.pathname !== "/v1/chat/completions" || request.method !== "POST") {
+      return json({ error: "Not found" }, 404);
+    }
+    // Fail closed when inference or rate limiting bindings are missing.
+    if (!env.AI || !env.RATE_LIMITER) {
+      return json({ error: "XAI Cloud is not configured" }, 503);
+    }
     const ip = request.headers.get("CF-Connecting-IP");
-    if (!ip) return json({ error: "Client identity unavailable" }, 403, cors);
+    if (!ip) return json({ error: "Client identity unavailable" }, 403);
     try {
-      const { success } = await env.RATE_LIMITER.limit({ key: ip });
-      if (!success) return json({ error: "Too many requests" }, 429, { ...cors, "Retry-After": "60" });
-    } catch {
-      return json({ error: "Rate limiter unavailable" }, 503, cors);
+      const result = await env.RATE_LIMITER.limit({ key: ip });
+      if (!result.success) {
+        return json({ error: "Rate limit reached. Retry later." }, 429, { "Retry-After": "60" });
+      }
+    } catch (_) {
+      return json({ error: "Rate limiting unavailable" }, 503);
     }
-    const length = Number(request.headers.get("content-length") || 0);
-    if (length > 32000) return json({ error: "Request too large" }, 413, cors);
-    let body;
-    try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400, cors); }
-    if (!Array.isArray(body.messages) || body.messages.length < 1 || body.messages.length > 24)
-      return json({ error: "Invalid message history" }, 400, cors);
+
+    // Enforce actual request size: Content-Length may be missing or incorrect.
+    let raw;
+    try {
+      if (Number(request.headers.get("Content-Length") || 0) > 32000)
+        return json({ error: "Request too large" }, 413);
+      raw = await request.text();
+      if (raw.length > 32000) return json({ error: "Request too large" }, 413);
+    } catch (_) {
+      return json({ error: "Unable to read request" }, 400);
+    }
+
+    let payload;
+    try { payload = JSON.parse(raw); }
+    catch (_) { return json({ error: "Invalid JSON" }, 400); }
+    if (!payload || !Array.isArray(payload.messages) ||
+        payload.messages.length < 1 || payload.messages.length > 24) {
+      return json({ error: "Expected 1-24 chat messages" }, 400);
+    }
     const messages = [];
-    for (const msg of body.messages) {
-      if (!msg || !["system", "user", "assistant"].includes(msg.role) || typeof msg.content !== "string")
-        return json({ error: "Invalid message" }, 400, cors);
-      if (msg.content.length > 6000) return json({ error: "Message too long" }, 413, cors);
-      messages.push({ role: msg.role, content: msg.content });
+    for (const item of payload.messages) {
+      if (!item || !["system", "user", "assistant"].includes(item.role) ||
+          typeof item.content !== "string" || !item.content.trim() ||
+          item.content.length > 6000) {
+        return json({ error: "Invalid chat message" }, 400);
+      }
+      messages.push({ role: item.role, content: item.content });
     }
-    // Important: deploy ONLY after setting Cloudflare WAF rate limits and usage quotas.
-    // An unauthenticated public endpoint can exhaust provider credits.
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Authorization": "Bearer " + env.GROQ_API_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: env.GROQ_MODEL || "openai/gpt-oss-20b",
+    if (!messages.some((m) => m.role === "user")) {
+      return json({ error: "At least one user message is required" }, 400);
+    }
+
+    try {
+      const result = await env.AI.run(MODEL, {
         messages,
-        max_tokens: 600,
+        max_tokens: 450,
         temperature: 0.7,
-      }),
-      signal: AbortSignal.timeout(25000),
-    });
-    if (!response.ok) return json({ error: response.status === 429 ? "AI busy; try again later" : "AI provider unavailable" }, response.status === 429 ? 429 : 502, cors);
-    const data = await response.json();
-    return json({ choices: [{ message: { role: "assistant", content: data.choices?.[0]?.message?.content || "" } }] }, 200, cors);
+      });
+      const content = result?.response;
+      if (typeof content !== "string" || !content.trim()) {
+        return json({ error: "AI produced no response" }, 502);
+      }
+      // OpenAI-compatible response for XAI Android Brain.kt
+      return json({
+        model: MODEL,
+        choices: [{ message: { role: "assistant", content } }],
+      });
+    } catch (_) {
+      // Do not reveal internal platform errors or credentials.
+      return json({ error: "AI unavailable or free quota reached" }, 503);
+    }
   },
 };
-function json(data, status, headers) {
-  return new Response(JSON.stringify(data), { status, headers: { ...headers, "Content-Type": "application/json", "Cache-Control": "no-store" } });
-}
