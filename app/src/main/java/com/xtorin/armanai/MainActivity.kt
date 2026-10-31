@@ -86,7 +86,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
     private fun showChat() {
         screen("◈ Xtorin AI")
-        root.addView(text("LOCAL ASSISTANT  •  v0.2",11f,Color.LTGRAY))
+        root.addView(text("LOCAL ASSISTANT  •  v0.4 development",11f,Color.LTGRAY))
         scroll = ScrollView(this).apply { isFillViewport = true }
         transcript = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0,12,0,12) }
         scroll.addView(transcript)
@@ -119,12 +119,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val offline = command in listOf("help","time","date","memories","projects","history","settings","new chat","voice","/learned","/random learn","/randomlearn") ||
             listOf("remember ","recall ","clear memory ","teach ","define ","relate ").any { command.startsWith(it) }
         if(command=="/random learn" || command=="/randomlearn") {
-            val topics=listOf("Solar System","Cell biology","Ancient Egypt","Computer science","Photosynthesis","Ocean","Mathematics","World Wide Web","Evolution","Music theory","Geology","History of astronomy")
             val topic=nextLearningTopic()
             researchTopic(topic,true)
             return
         }
         if(command=="/learned") { showLearned(); return }
+        if(command in listOf("projects","history","settings","new chat","voice")) {
+            when(command) {
+                "projects" -> showProjects()
+                "history" -> showHistory()
+                "settings" -> showSettings()
+                "new chat" -> newChat()
+                "voice" -> startVoice()
+            }
+            return
+        }
         if(command.startsWith("/research ") || command.startsWith("/learn ")) {
             val learning=command.startsWith("/learn ")
             researchTopic(value.substringAfter(" ").trim(),learning)
@@ -132,7 +141,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         if(command.startsWith("/recall ")) {
             val topic=value.substring(8).trim().lowercase(Locale.ROOT).take(100)
-            addMessage(prefs.getString("research_"+topic,null) ?: "Nothing saved for that topic yet.",false)
+            val saved=prefs.getString("research_"+topic,null)
+            addMessage(saved ?: ConceptMemory.lookup(conceptGraph(),topic) ?: "Nothing saved for that topic yet.",false)
             return
         }
         val factual=command.startsWith("what is ") || command.startsWith("who is ") ||
@@ -180,7 +190,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun researchTopic(topic:String, save:Boolean) {
         if(topic.isBlank()) { addMessage("Use /research TOPIC or /learn TOPIC",false); return }
         val requestChatId=chatId
-        addMessage("Researching sources and related topics…",false)
+        val pending="Researching sources and related topics…"
+        addMessage(pending,false)
         Thread {
             val found=try { WebKnowledge.wikipedia(topic) } catch (_:Exception) { null }
             val extras=mutableListOf<WebKnowledge.Result>()
@@ -211,7 +222,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             runOnUiThread {
                 val arr=try { JSONArray(prefs.getString("chat_$requestChatId","[]")) } catch (_:Exception) { JSONArray() }
-                if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Researching sources and related topics…") arr.remove(arr.length()-1)
+                for(i in arr.length()-1 downTo 0) {
+                    if(arr.optJSONObject(i)?.optString("text")==pending && !arr.optJSONObject(i)!!.optBoolean("user")) {
+                        arr.remove(i)
+                        break
+                    }
+                }
                 arr.put(JSONObject().put("text",answer).put("user",false))
                 prefs.edit().putString("chat_$requestChatId",arr.toString()).apply()
                 if(chatId==requestChatId) showChat()
@@ -471,7 +487,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun reply(message:String):String {
         val clean=message.trim(); val lower=clean.lowercase(Locale.ROOT)
         return when {
-            lower=="help" -> "Commands: /research TOPIC, /learn TOPIC, help, time, date, remember KEY = VALUE, recall KEY, teach QUESTION => ANSWER, define WORD = MEANING, relate SUBJECT | RELATION | OBJECT, memories, projects, history, settings, new chat, voice."
+            lower=="help" -> "Commands: /learn TOPIC, /random learn, /learned, /research TOPIC, /recall TOPIC, help, time, date, remember KEY = VALUE, recall KEY, teach QUESTION => ANSWER, define WORD = MEANING, relate SUBJECT | RELATION | OBJECT, memories, projects, history, settings, new chat, voice."
             lower.startsWith("teach ") -> {
                 val parts=clean.substring(6).split("=>",limit=2)
                 if(parts.size!=2 || parts.any { it.isBlank() }) "Use: teach QUESTION => ANSWER"
