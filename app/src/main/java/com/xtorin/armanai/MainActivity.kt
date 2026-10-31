@@ -129,7 +129,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val answer = try { Brain.ask(endpoint,key,model,snapshot,memory,kids) }
                     catch(e:Exception) { "AI connection failed: ${e.javaClass.simpleName}. Check your provider settings and internet." }
                 runOnUiThread {
-                    if(chatId != requestChatId) chatId = requestChatId
+                    if(chatId != requestChatId) {
+                        val other = try { JSONArray(prefs.getString("chat_$requestChatId","[]")) } catch (_:Exception) { JSONArray() }
+                        if(other.length()>0 && other.optJSONObject(other.length()-1)?.optString("text")=="Thinking…") other.remove(other.length()-1)
+                        other.put(JSONObject().put("text",answer).put("user",false))
+                        prefs.edit().putString("chat_$requestChatId",other.toString()).apply()
+                        return@runOnUiThread
+                    }
                     val arr = messages()
                     if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Thinking…") {
                         arr.remove(arr.length()-1); store(arr)
@@ -277,9 +283,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         root.addView(text("Desktop companion not yet available. Pairing requires a verified Windows app, authenticated connection and explicit device permission."))
         root.addView(text("Never expose a Windows control port directly to the internet.",13f,Color.LTGRAY))
     }
-    private fun pinHash(pin:String):String {
+    private fun pinHash(pin:String, salt:String):String {
         val digest=java.security.MessageDigest.getInstance("SHA-256")
-        return digest.digest(pin.toByteArray()).joinToString("") { "%02x".format(it) }
+        return digest.digest((salt+":"+pin).toByteArray()).joinToString("") { "%02x".format(it) }
     }
     private fun showParentControls() {
         val stored=prefs.getString("parent_pin_hash",null)
@@ -294,10 +300,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val pin=field.text.toString()
                 if(stored==null) {
                     if(pin.length>=6 && pin.all { it.isDigit() }) {
-                        prefs.edit().putString("parent_pin_hash",pinHash(pin)).apply()
+                        val salt=UUID.randomUUID().toString()
+                        prefs.edit().putString("parent_pin_salt",salt).putString("parent_pin_hash",pinHash(pin,salt)).apply()
                         parentOptions()
                     } else info("Invalid PIN","Use at least six digits.")
-                } else if(pinHash(pin)==stored) parentOptions()
+                } else if(pinHash(pin,prefs.getString("parent_pin_salt","").orEmpty())==stored) parentOptions()
                 else info("Access denied","Incorrect parent PIN.")
             }.show()
     }
