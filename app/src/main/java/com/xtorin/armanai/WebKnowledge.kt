@@ -93,6 +93,23 @@ object WebKnowledge {
         return Result("Open Library books", lines.joinToString("\\n"), "https://openlibrary.org/search?q=$q")
     }
 
+    /** Wikipedia categories provide a lightweight topic map, not a full learning curriculum. */
+    fun relatedTopics(topic: String): List<String> {
+        val q = URLEncoder.encode(topic.take(120), "UTF-8")
+        val url = "https://en.wikipedia.org/w/api.php?action=query&format=json&prop=categories&cllimit=30&titles=" + q
+        val data = getJson(url) ?: return emptyList()
+        val pages = data.optJSONObject("query")?.optJSONObject("pages") ?: return emptyList()
+        val keys = pages.keys()
+        if (!keys.hasNext()) return emptyList()
+        val categories = pages.optJSONObject(keys.next())?.optJSONArray("categories") ?: return emptyList()
+        return (0 until categories.length()).mapNotNull { index ->
+            val name = categories.optJSONObject(index)?.optString("title", "")
+                ?.removePrefix("Category:")?.trim().orEmpty()
+            if (name.isBlank() || name.startsWith("Articles ") || name.startsWith("Pages ") ||
+                name.contains("Wikipedia") || name.contains("CS1 ") || name.contains("Webarchive")) null else name
+        }.distinct().take(8)
+    }
+
     fun googleSearchUrl(query: String): String =
         "https://www.google.com/search?q=" + URLEncoder.encode(query.take(300), "UTF-8")
 }
