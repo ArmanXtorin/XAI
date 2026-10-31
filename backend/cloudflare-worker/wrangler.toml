@@ -14,3 +14,16 @@ namespace_id = "1001"
 [ratelimits.simple]
 limit = 10
 period = 60
+
+# Match the Cloudflare dashboard's production logging settings.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[observability.traces]
+enabled = false
