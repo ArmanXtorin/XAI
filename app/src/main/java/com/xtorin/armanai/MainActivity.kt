@@ -145,8 +145,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if(value.isEmpty()) return
         input.setText("")
         addMessage(value,true)
-        val endpoint = prefs.getString("ai_endpoint","").orEmpty().trim()
-        val model = prefs.getString("ai_model","").orEmpty().trim()
+        val endpoint = prefs.getString("ai_endpoint","https://api.groq.com/openai/v1/chat/completions").orEmpty().trim()
+        val model = prefs.getString("ai_model","openai/gpt-oss-20b").orEmpty().trim()
         val command = value.lowercase(Locale.ROOT)
         val offline = command in listOf("help","time","date","memories","projects","history","settings","new chat","voice","/learned","/random learn","/randomlearn") ||
             listOf("remember ","recall ","clear memory ","teach ","define ","relate ").any { command.startsWith(it) }
@@ -186,7 +186,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 return
             }
         }
-        if(endpoint.isNotEmpty() && model.isNotEmpty() && !offline) {
+        if(endpoint.isNotEmpty() && model.isNotEmpty() && prefs.getString("ai_key","").orEmpty().isNotBlank() && !offline) {
             val requestChatId = chatId
             val snapshot = JSONArray(messages().toString())
             val memory = allMemories()
@@ -391,13 +391,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             check.setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean(key,checked).apply() }
             list.addView(check)
         }
-        list.addView(text("AI Brain • OpenAI-compatible provider",18f,accent))
+        list.addView(text("AI Brain • Groq free-tier default",18f,accent))
+        list.addView(text("Real hosted LLM responses require a personal API key. Free access has limits; never share your key in chat.",12f,Color.LTGRAY))
+        list.addView(button("Use Groq defaults") {
+            prefs.edit().putString("ai_endpoint","https://api.groq.com/openai/v1/chat/completions")
+                .putString("ai_model","openai/gpt-oss-20b").apply()
+            showSettings()
+        })
         list.addView(text("Enter an HTTPS chat-completions URL, model ID and optional provider API key. Messages and saved memories will be sent to that provider.",12f,Color.LTGRAY))
         fun config(label:String,key:String,secret:Boolean=false) {
             val field=EditText(this).apply {
                 hint=label; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE)
                 setSingleLine(true)
-                setText(prefs.getString(key,""))
+                setText(prefs.getString(key,when(key) {
+                    "ai_endpoint" -> "https://api.groq.com/openai/v1/chat/completions"
+                    "ai_model" -> "openai/gpt-oss-20b"
+                    else -> ""
+                }))
                 if(secret) inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             }
             list.addView(field)
@@ -407,6 +417,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         config("HTTPS endpoint (…/chat/completions)","ai_endpoint")
         config("Model ID","ai_model")
         config("API key (optional)","ai_key",true)
+        list.addView(text("Without a configured key, XAI continues in limited offline mode. Chat history is sent to the chosen provider when enabled.",12f,Color.LTGRAY))
         list.addView(text("AI response customization",18f,accent))
         toggle("Speak responses aloud","speak")
         toggle("Concise response preference","concise",true)
