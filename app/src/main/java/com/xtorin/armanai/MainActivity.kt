@@ -31,6 +31,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     private val voiceCode = 71
     private val fileCode = 72
+    private var pendingChatId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,6 +119,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val offline = command in listOf("help","time","date","memories","projects","history","settings","new chat","voice") ||
             listOf("remember ","recall ","clear memory ").any { command.startsWith(it) }
         if(endpoint.isNotEmpty() && model.isNotEmpty() && !offline) {
+            val requestChatId = chatId
             val snapshot = JSONArray(messages().toString())
             val memory = allMemories()
             val key = prefs.getString("ai_key","").orEmpty()
@@ -127,6 +129,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val answer = try { Brain.ask(endpoint,key,model,snapshot,memory,kids) }
                     catch(e:Exception) { "AI connection failed: ${e.javaClass.simpleName}. Check your provider settings and internet." }
                 runOnUiThread {
+                    if(chatId != requestChatId) chatId = requestChatId
                     val arr = messages()
                     if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Thinking…") {
                         arr.remove(arr.length()-1); store(arr)
@@ -162,11 +165,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         entry("📁 Projects") { showProjects() }
         entry("🖼 Media library") { showMedia() }
         entry("⌨ XCode") { showCode() }
-        entry("🧠 Expert mode") { info("Expert mode","An AI model is not connected. Offline commands remain available.") }
+        entry("🧠 Expert mode") { info("Expert mode",if(prefs.getString("ai_endpoint","").isNullOrBlank()) "Configure a compatible AI provider in Settings." else "Your configured AI model is available through Chat.") }
         entry("🎨 Image generation") { info("Image generation","Requires an image generation provider. No image is generated offline.") }
-        entry("🖥 Windows connection") { info("Windows connection","A secure desktop companion and pairing protocol are required. Not connected.") }
+        entry("🖥 Windows connection") { showWindows() }
         entry("⚙ Settings") { showSettings() }
-        entry("ℹ About") { info("Xtorin AI v0.2","Offline-first Android prototype. Chat history and memory are stored locally. No AI model or cloud account is connected.") }
+        entry("ℹ About") { info("Xtorin AI v0.3","Offline commands, optional AI provider, and local chats. Windows companion and image generation still require integrations.") }
     }
     private fun showHistory() {
         screen("Previous chats")
@@ -249,8 +252,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         toggle("Speak responses aloud","speak")
         toggle("Concise response preference","concise",true)
         list.addView(text("Safety & access",18f,accent))
-        toggle("Kids mode (local setting)","kids_mode")
-        toggle("Safe AI mode preference","safe",true)
+        list.addView(button("Parent controls • PIN-protected") { showParentControls() })
+        list.addView(text("Kids mode can be managed in Parent controls. A local PIN is not a substitute for a supervised child account.",12f,Color.LTGRAY))
+        list.addView(text("Core safeguards are not disabled by this setting.",12f,Color.LTGRAY))
         list.addView(text("Safe mode is a local preference, not a security filter or model safeguard.",12f,Color.LTGRAY))
         list.addView(text("Memory",18f,accent))
         list.addView(button("View saved memories") { info("Saved memories",allMemories()) })
@@ -265,8 +269,47 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         list.addView(text("Account security",18f,accent))
         list.addView(text("Offline-only: no cloud account or login exists yet.",13f,Color.LTGRAY))
         list.addView(text("Accessibility",18f,accent))
-        toggle("Read answers aloud","speak")
-        list.addView(button("About app") { info("About Xtorin AI","Version 0.2 • Kotlin • Offline-first • No network permissions") })
+        list.addView(text("Voice recognition uses an Android speech service and may require network access.",12f,Color.LTGRAY))
+        list.addView(button("About app") { info("About Xtorin AI","Version 0.3 • Kotlin • Offline-first with optional HTTPS AI") })
+    }
+    private fun showWindows() {
+        screen("Windows connection")
+        root.addView(text("Desktop companion not yet available. Pairing requires a verified Windows app, authenticated connection and explicit device permission."))
+        root.addView(text("Never expose a Windows control port directly to the internet.",13f,Color.LTGRAY))
+    }
+    private fun pinHash(pin:String):String {
+        val digest=java.security.MessageDigest.getInstance("SHA-256")
+        return digest.digest(pin.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+    private fun showParentControls() {
+        val stored=prefs.getString("parent_pin_hash",null)
+        val field=EditText(this).apply {
+            hint=if(stored==null) "Create a parent PIN (at least 6 digits)" else "Enter parent PIN"
+            inputType=android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        }
+        android.app.AlertDialog.Builder(this).setTitle("Parent controls")
+            .setMessage(if(stored==null) "Create a PIN to protect Kids Mode settings." else "Enter your parent PIN.")
+            .setView(field).setNegativeButton("Cancel",null)
+            .setPositiveButton("Continue") { _,_ ->
+                val pin=field.text.toString()
+                if(stored==null) {
+                    if(pin.length>=6 && pin.all { it.isDigit() }) {
+                        prefs.edit().putString("parent_pin_hash",pinHash(pin)).apply()
+                        parentOptions()
+                    } else info("Invalid PIN","Use at least six digits.")
+                } else if(pinHash(pin)==stored) parentOptions()
+                else info("Access denied","Incorrect parent PIN.")
+            }.show()
+    }
+    private fun parentOptions() {
+        val options=arrayOf("Standard mode","Kids mode")
+        val selected=if(prefs.getBoolean("kids_mode",false)) 1 else 0
+        android.app.AlertDialog.Builder(this).setTitle("Parent controls")
+            .setSingleChoiceItems(options,selected) { dialog,which ->
+                prefs.edit().putBoolean("kids_mode",which==1).apply()
+                dialog.dismiss()
+                info("Mode updated",options[which]+" selected. Model providers may enforce additional protections.")
+            }.setNegativeButton("Cancel",null).show()
     }
     private fun info(title:String,body:String) { android.app.AlertDialog.Builder(this).setTitle(title).setMessage(body).setPositiveButton("OK",null).show() }
     private fun startVoice() {
