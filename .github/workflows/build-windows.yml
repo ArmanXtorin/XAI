@@ -1,0 +1,30 @@
+name: Build XAI Windows EXE
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "windows/**"
+      - ".github/workflows/build-windows.yml"
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build dependencies
+        run: python -m pip install --disable-pip-version-check pyinstaller==6.16.0 pillow
+      - name: Validate companion syntax
+        run: python -m py_compile windows/companion.py
+      - name: Build XAI Desktop Companion
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name XAI-Desktop-Companion windows/companion.py
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: XAI-Desktop-Companion-Windows
+          path: dist/XAI-Desktop-Companion.exe
+          retention-days: 14
