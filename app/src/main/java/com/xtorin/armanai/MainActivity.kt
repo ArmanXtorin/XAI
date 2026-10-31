@@ -20,9 +20,17 @@ import java.util.UUID
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val prefs by lazy { getSharedPreferences("xtorinai_local", MODE_PRIVATE) }
-    private val bg = Color.rgb(10,15,25)
-    private val panel = Color.rgb(23,32,48)
-    private val accent = Color.rgb(57,211,191)
+    private val bg = Color.rgb(9,13,25)
+    private val panel = Color.rgb(29,38,60)
+    private val accent = Color.rgb(123,199,255)
+    private val glassBorder = Color.argb(100,175,204,255)
+    private fun dp(value:Int):Int = (value * resources.displayMetrics.density).toInt()
+    private fun glass(color:Int=panel, radius:Int=22):GradientDrawable =
+        GradientDrawable(GradientDrawable.Orientation.TL_BR,
+            intArrayOf(Color.argb(238,43,56,84),color)).apply {
+            cornerRadius=dp(radius).toFloat()
+            setStroke(dp(1),glassBorder)
+        }
     private lateinit var root: LinearLayout
     private lateinit var transcript: LinearLayout
     private lateinit var input: EditText
@@ -44,22 +52,32 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) { if (status == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault() }
     override fun onDestroy() { tts?.stop(); tts?.shutdown(); super.onDestroy() }
 
-    private fun shape(color: Int): GradientDrawable = GradientDrawable().apply { setColor(color); cornerRadius = 22f }
+    private fun shape(color: Int): GradientDrawable = glass(color)
     private fun text(value: String, size: Float = 15f, color: Int = Color.WHITE): TextView =
         TextView(this).apply { text = value; textSize = size; setTextColor(color); setPadding(12,12,12,12) }
     private fun button(label: String, action: () -> Unit): Button = Button(this).apply {
         text = label; textSize = 12f; isAllCaps = false
-        setTextColor(Color.WHITE); background = shape(panel)
+        setTextColor(Color.WHITE); background = glass()
+        elevation=dp(3).toFloat(); minHeight=dp(48)
+        setPadding(dp(12),dp(7),dp(12),dp(7))
         setOnClickListener { action() }
     }
     private fun screen(title: String): LinearLayout {
-        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(bg); setPadding(14,14,14,14) }
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background=GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.rgb(12,20,38),Color.rgb(9,13,25),Color.rgb(20,22,44)))
+            setPadding(dp(14),dp(12),dp(14),dp(12))
+        }
         setContentView(root)
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        header.background=glass(Color.argb(240,24,34,54),26)
+        header.setPadding(dp(6),dp(5),dp(6),dp(5))
+        header.elevation=dp(5).toFloat()
         header.addView(button("☰") { showMenu() })
-        header.addView(text(title,20f,accent), LinearLayout.LayoutParams(0,-2,1f))
+        header.addView(text(title,19f,Color.WHITE).apply { setTypeface(null,Typeface.BOLD) }, LinearLayout.LayoutParams(0,-2,1f))
         header.addView(button("＋") { newChat() })
-        root.addView(header)
+        root.addView(header,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(12) })
         return root
     }
     private fun messages(): JSONArray = try { JSONArray(prefs.getString("chat_$chatId", "[]")) } catch (_:Exception) { JSONArray() }
@@ -73,8 +91,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
     private fun bubble(value: String, user: Boolean) {
         val bubble = text((if(user) "YOU  •  " else "XTORIN AI  •  ") + value,15f).apply {
-            background = shape(if(user) Color.rgb(20,83,84) else panel)
-            setPadding(18,16,18,16)
+            background = glass(if(user) Color.rgb(26,78,105) else Color.rgb(28,39,62),20)
+            elevation=dp(2).toFloat()
+            setPadding(dp(16),dp(13),dp(16),dp(13))
             setOnLongClickListener {
                 val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Xtorin AI",value))
@@ -82,11 +101,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 true
             }
         }
-        transcript.addView(bubble, LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=10 })
+        transcript.addView(bubble, LinearLayout.LayoutParams(-1,-2).apply {
+            bottomMargin=dp(12)
+            if(user) leftMargin=dp(38) else rightMargin=dp(25)
+        })
     }
     private fun showChat() {
         screen("◈ Xtorin AI")
-        root.addView(text("LOCAL ASSISTANT  •  v0.4 development",11f,Color.LTGRAY))
+        root.addView(text("●  LOCAL INTELLIGENCE     •     XAI v0.4",11f,accent).apply {
+            background=glass(Color.argb(215,18,31,49),18)
+            setPadding(dp(15),dp(9),dp(15),dp(9))
+        },LinearLayout.LayoutParams(-1,-2).apply { bottomMargin=dp(8) })
         scroll = ScrollView(this).apply { isFillViewport = true }
         transcript = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0,12,0,12) }
         scroll.addView(transcript)
@@ -97,12 +122,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             bubble(obj.optString("text"),obj.optBoolean("user"))
         }
         if(arr.length()==0) bubble("Welcome to Xtorin AI. Offline commands are ready. Type help to begin.",false)
-        val composer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val composer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background=glass(Color.rgb(21,30,49),26)
+            setPadding(dp(6),dp(5),dp(6),dp(5))
+            elevation=dp(8).toFloat()
+        }
         composer.addView(button("📎") { selectFile() })
         composer.addView(button("🎤") { startVoice() })
         input = EditText(this).apply {
             hint = "Message or command…"; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE)
             textSize = 14f; minLines = 1; maxLines = 4
+            backgroundTintList=android.content.res.ColorStateList.valueOf(Color.TRANSPARENT)
+            setPadding(dp(9),dp(8),dp(9),dp(8))
         }
         composer.addView(input,LinearLayout.LayoutParams(0,-2,1f))
         composer.addView(button("➤") { send() })
