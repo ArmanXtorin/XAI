@@ -19,10 +19,18 @@ jobs:
       - name: Install build dependencies
         run: python -m pip install --disable-pip-version-check pyinstaller==6.16.0 pillow
       - name: Validate companion syntax
-        run: python -m py_compile windows/companion.py
+        run: python -m py_compile windows/companion.py windows/desktop_app.py
+      - name: Build XAI Desktop App
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name XAI windows/desktop_app.py
       - name: Build XAI Desktop Companion
         run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name XAI-Desktop-Companion windows/companion.py
-      - name: Upload Windows EXE
+      - name: Upload XAI Desktop Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: XAI-Windows-Desktop
+          path: dist/XAI.exe
+          retention-days: 14
+      - name: Upload Windows Companion EXE
         uses: actions/upload-artifact@v4
         with:
           name: XAI-Desktop-Companion-Windows
