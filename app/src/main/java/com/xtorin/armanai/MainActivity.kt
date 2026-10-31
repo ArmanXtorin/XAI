@@ -171,31 +171,36 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun researchTopic(topic:String, save:Boolean) {
         if(topic.isBlank()) { addMessage("Use /research TOPIC or /learn TOPIC",false); return }
         val requestChatId=chatId
-        addMessage("Researching Wikipedia…",false)
+        addMessage("Researching sources and related topics…",false)
         Thread {
             val found=try { WebKnowledge.wikipedia(topic) } catch (_:Exception) { null }
             val extras=mutableListOf<WebKnowledge.Result>()
             try { WebKnowledge.github(topic)?.let { extras.add(it) } } catch (_:Exception) {}
             try { WebKnowledge.stackExchange(topic)?.let { extras.add(it) } } catch (_:Exception) {}
             try { WebKnowledge.openLibrary(topic)?.let { extras.add(it) } } catch (_:Exception) {}
-            val answer=if(found==null && extras.isEmpty()) "No public source result found.\n"+WebKnowledge.searchLinks(topic)
-            else {
-                if(save && found!=null) {
-                    synchronized(prefs) {
-                        val graph=conceptGraph()
-                        ConceptMemory.define(graph,found.title,found.summary)
-                        prefs.edit().putString("concept_graph",graph.toString())
-                            .putString("research_"+found.title.lowercase(Locale.ROOT).take(100),
-                                found.summary+"\\nSource: "+found.source).apply()
-                    }
+            val related=if(found!=null) try { WebKnowledge.relatedTopics(found.title) } catch (_:Exception) { emptyList() } else emptyList()
+            if(save && found!=null) {
+                synchronized(prefs) {
+                    val graph=conceptGraph()
+                    ConceptMemory.define(graph,found.title,found.summary)
+                    related.forEach { ConceptMemory.relate(graph,found.title,"related category",it) }
+                    prefs.edit().putString("concept_graph",graph.toString())
+                        .putString("research_"+found.title.lowercase(Locale.ROOT).take(100),
+                            found.summary+"\nSource: "+found.source).apply()
                 }
-                found.title+": "+found.summary+"\\nSource: "+found.source+
-                    (if(save) "\\nSaved locally." else "")+
-                    "\\nGoogle: "+WebKnowledge.googleSearchUrl(topic)
+            }
+            val answer=if(found==null && extras.isEmpty())
+                "No public source result found.\n"+WebKnowledge.searchLinks(topic)
+            else buildString {
+                if(found!=null) append(found.title+": "+found.summary+"\nSource: "+found.source)
+                if(related.isNotEmpty()) append("\n\nRELATED TOPICS\n"+related.joinToString("\n") { "• "+it })
+                extras.forEach { append("\n\n"+it.title+": "+it.summary+"\nSource: "+it.source) }
+                if(save && found!=null) append("\n\nSaved facts and topic connections locally.")
+                append("\n\nAdditional search links:\n"+WebKnowledge.searchLinks(topic))
             }
             runOnUiThread {
                 val arr=try { JSONArray(prefs.getString("chat_$requestChatId","[]")) } catch (_:Exception) { JSONArray() }
-                if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Researching Wikipedia…") arr.remove(arr.length()-1)
+                if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Researching sources and related topics…") arr.remove(arr.length()-1)
                 arr.put(JSONObject().put("text",answer).put("user",false))
                 prefs.edit().putString("chat_$requestChatId",arr.toString()).apply()
                 if(chatId==requestChatId) showChat()
