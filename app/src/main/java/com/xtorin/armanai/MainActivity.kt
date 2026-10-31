@@ -39,6 +39,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     private val voiceCode = 71
     private val fileCode = 72
+    private val imageCode = 73
     private var pendingChatId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -129,6 +130,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             elevation=dp(8).toFloat()
         }
         composer.addView(button("📎") { selectFile() })
+        composer.addView(button("🖼") { selectImage() })
         composer.addView(button("🎤") { startVoice() })
         input = EditText(this).apply {
             hint = "Message or command…"; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE)
@@ -189,7 +191,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if(endpoint.isNotEmpty() && model.isNotEmpty() && prefs.getString("ai_key","").orEmpty().isNotBlank() && !offline) {
             val requestChatId = chatId
             val snapshot = JSONArray(messages().toString())
-            val memory = allMemories()
+            val memory = if (prefs.getBoolean("share_memories_with_ai",false)) allMemories() else "Memory sharing disabled."
             val key = prefs.getString("ai_key","").orEmpty()
             val kids = prefs.getBoolean("kids_mode",false)
             addMessage("Thinking…",false)
@@ -322,6 +324,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         entry("🕘 Previous chats") { showHistory() }
         entry("📁 Projects") { showProjects() }
         entry("📚 Learned knowledge") { showLearned() }
+        entry("🧠 Saved memories") { showMemoryManager() }
         entry("🖼 Media library") { showMedia() }
         entry("⌨ XCode") { showCode() }
         entry("🧠 Expert mode") { info("Expert mode",if(prefs.getString("ai_endpoint","").isNullOrBlank()) "Configure a compatible AI provider in Settings." else "Your configured AI model is available through Chat.") }
@@ -329,6 +332,64 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         entry("🖥 Windows connection") { showWindows() }
         entry("⚙ Settings") { showSettings() }
         entry("ℹ About") { info("Xtorin AI v0.3","Offline commands, optional AI provider, and local chats. Windows companion and image generation still require integrations.") }
+    }
+    /** User-controlled, on-device memories. Existing "memory_*" entries remain compatible. */
+    private fun showMemoryManager() {
+        screen("Saved memories")
+        root.addView(text("Stored on this phone. You decide if saved memories are included in cloud AI requests.",12f,Color.LTGRAY))
+        val list=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
+        val sc=ScrollView(this); sc.addView(list)
+        root.addView(sc,LinearLayout.LayoutParams(-1,0,1f))
+
+        fun editMemory(existing:String? = null, refresh:()->Unit) {
+            val fields=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL
+                setPadding(dp(14),dp(8),dp(14),dp(8))
+            }
+            val name=EditText(this).apply {
+                hint="Memory name"; setSingleLine(true)
+                setText(existing ?: "")
+                isEnabled=existing==null
+            }
+            val value=EditText(this).apply {
+                hint="What should XAI remember?"; minLines=3; maxLines=7
+                setText(if(existing==null) "" else prefs.getString("memory_"+existing,""))
+            }
+            fields.addView(name); fields.addView(value)
+            android.app.AlertDialog.Builder(this).setTitle(if(existing==null) "New memory" else "Edit memory")
+                .setView(fields).setNegativeButton("Cancel",null)
+                .setPositiveButton("Save") { _,_ ->
+                    val key=name.text.toString().trim().lowercase(Locale.ROOT)
+                    val note=value.text.toString().trim()
+                    if(key.isBlank() || key.length>80 || note.isBlank() || note.length>2000) {
+                        Toast.makeText(this,"Name: 1-80 characters; note: 1-2000 characters",Toast.LENGTH_LONG).show()
+                    } else {
+                        prefs.edit().putString("memory_"+key,note).apply()
+                        refresh()
+                    }
+                }.show()
+        }
+        fun render() {
+            list.removeAllViews()
+            val keys=prefs.all.keys.filter { it.startsWith("memory_") }.sorted()
+            if(keys.isEmpty()) list.addView(text("No memories yet. Add one here or use: remember KEY = VALUE"))
+            keys.forEach { raw ->
+                val key=raw.removePrefix("memory_")
+                list.addView(text(key+"\n"+prefs.getString(raw,"").orEmpty().take(450),14f))
+                list.addView(button("Edit: "+key) { editMemory(key,::render) })
+                list.addView(button("Delete: "+key) {
+                    android.app.AlertDialog.Builder(this).setTitle("Delete memory?")
+                        .setMessage("Remove '"+key+"' from this device?")
+                        .setNegativeButton("Cancel",null)
+                        .setPositiveButton("Delete") { _,_ ->
+                            prefs.edit().remove(raw).apply()
+                            render()
+                        }.show()
+                })
+            }
+        }
+        root.addView(button("＋ Add memory") { editMemory(null,::render) })
+        render()
     }
     private fun showHistory() {
         screen("Previous chats")
@@ -380,7 +441,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         screen("Media library")
         root.addView(text("Use the attachment button in chat to select a file. Android's file picker keeps access under your control."))
         root.addView(button("Choose file") { selectFile() })
-        root.addView(text("Selected files are referenced by name in chat. They are not analyzed by an AI model.",13f,Color.LTGRAY))
+        root.addView(button("Analyze image with AI") { selectImage() })
+        root.addView(text("Image analysis requires a configured XAI Cloud vision endpoint and an explicit upload confirmation. Other attachments stay filename-only.",13f,Color.LTGRAY))
     }
     private fun showSettings() {
         screen("Settings")
@@ -427,7 +489,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         list.addView(text("Core safeguards are not disabled by this setting.",12f,Color.LTGRAY))
         list.addView(text("Safe mode is a local preference, not a security filter or model safeguard.",12f,Color.LTGRAY))
         list.addView(text("Memory",18f,accent))
-        list.addView(button("View saved memories") { info("Saved memories",allMemories()) })
+        list.addView(button("View or edit memories") { showMemoryManager() })
+        toggle("Include local memories in cloud AI requests","share_memories_with_ai")
         list.addView(button("Clear saved memories") {
             android.app.AlertDialog.Builder(this).setTitle("Clear memories?").setMessage("This removes locally saved memory entries.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Clear") { _,_ ->
@@ -444,7 +507,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
     private fun showWindows() {
         screen("Windows connection")
-        root.addView(text("Desktop companion not yet available. Pairing requires a verified Windows app, authenticated connection and explicit device permission."))
+        root.addView(text("A localhost-only Windows companion prototype is in the windows/ folder of the XAI repository. Screen capture and file changes require approval on the PC. Android pairing is not implemented yet."))
         root.addView(text("Never expose a Windows control port directly to the internet.",13f,Color.LTGRAY))
     }
     private fun pinHash(pin:String, salt:String):String {
@@ -498,6 +561,51 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             startActivityForResult(intent,fileCode)
         } catch (_:Exception) { info("Files unavailable","No compatible document picker found.") }
     }
+    private fun selectImage() {
+        try {
+            val intent=Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                type="image/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            startActivityForResult(intent,imageCode)
+        } catch (_:Exception) { info("Images unavailable","No image picker found on this device.") }
+    }
+    private fun confirmImageAnalysis(uri:android.net.Uri) {
+        val endpoint=prefs.getString("ai_endpoint","").orEmpty().trim()
+        if (!endpoint.startsWith("https://") || !endpoint.endsWith("/v1/chat/completions")) {
+            info("Vision not configured","Set an XAI Cloud HTTPS /v1/chat/completions endpoint in Settings first. The public XAI Cloud address is currently disabled.")
+            return
+        }
+        val prompt=EditText(this).apply {
+            setText("Describe this image and any important details.")
+            minLines=2; maxLines=5
+        }
+        android.app.AlertDialog.Builder(this).setTitle("Send image to AI?")
+            .setMessage("The selected image will be resized and uploaded to the configured HTTPS AI provider for analysis. Do not send private images unless you trust that provider.")
+            .setView(prompt)
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Upload and analyze") { _,_ ->
+                val requestId=chatId
+                val question=prompt.text.toString().trim().ifBlank { "Describe this image." }.take(300)
+                showChat()
+                addMessage("🖼 Image analysis: "+question,true)
+                addMessage("Analyzing image…",false)
+                val key=prefs.getString("ai_key","").orEmpty()
+                Thread {
+                    val answer=try { Vision.analyze(this,uri,endpoint,key,question) }
+                        catch(e:Exception) { "Image analysis failed: "+e.javaClass.simpleName }
+                    runOnUiThread {
+                        val arr=try { JSONArray(prefs.getString("chat_"+requestId,"[]")) }
+                            catch (_:Exception) { JSONArray() }
+                        if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Analyzing image…")
+                            arr.remove(arr.length()-1)
+                        arr.put(JSONObject().put("text",answer).put("user",false))
+                        prefs.edit().putString("chat_"+requestId,arr.toString()).apply()
+                        if(chatId==requestId) showChat()
+                    }
+                }.start()
+            }.show()
+    }
     @Deprecated("Legacy Android activity result API")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
@@ -505,6 +613,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if(requestCode==voiceCode) {
             val words=data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
             if(!words.isNullOrEmpty()) { showChat(); input.setText(words[0]) }
+        } else if(requestCode==imageCode) {
+            data?.data?.let { confirmImageAnalysis(it) }
         } else if(requestCode==fileCode) {
             val uri=data?.data ?: return
             var name="Attachment"
