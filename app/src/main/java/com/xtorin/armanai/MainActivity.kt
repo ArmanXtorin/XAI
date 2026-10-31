@@ -174,9 +174,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         addMessage("Researching Wikipedia…",false)
         Thread {
             val found=try { WebKnowledge.wikipedia(topic) } catch (_:Exception) { null }
-            val answer=if(found==null) "No Wikipedia summary found. Google search: "+WebKnowledge.googleSearchUrl(topic)
+            val extras=mutableListOf<WebKnowledge.Result>()
+            try { WebKnowledge.github(topic)?.let { extras.add(it) } } catch (_:Exception) {}
+            try { WebKnowledge.stackExchange(topic)?.let { extras.add(it) } } catch (_:Exception) {}
+            try { WebKnowledge.openLibrary(topic)?.let { extras.add(it) } } catch (_:Exception) {}
+            val answer=if(found==null && extras.isEmpty()) "No public source result found.\n"+WebKnowledge.searchLinks(topic)
             else {
-                if(save) {
+                if(save && found!=null) {
                     synchronized(prefs) {
                         val graph=conceptGraph()
                         ConceptMemory.define(graph,found.title,found.summary)
