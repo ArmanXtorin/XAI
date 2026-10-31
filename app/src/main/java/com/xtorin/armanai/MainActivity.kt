@@ -112,9 +112,35 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if(value.isEmpty()) return
         input.setText("")
         addMessage(value,true)
-        val answer = reply(value)
-        addMessage(answer,false)
-        if(prefs.getBoolean("speak",false)) tts?.speak(answer,TextToSpeech.QUEUE_FLUSH,null,"xtorin")
+        val endpoint = prefs.getString("ai_endpoint","").orEmpty().trim()
+        val model = prefs.getString("ai_model","").orEmpty().trim()
+        val command = value.lowercase(Locale.ROOT)
+        val offline = command in listOf("help","time","date","memories","projects","history","settings","new chat","voice") ||
+            listOf("remember ","recall ","clear memory ").any { command.startsWith(it) }
+        if(endpoint.isNotEmpty() && model.isNotEmpty() && !offline) {
+            val snapshot = JSONArray(messages().toString())
+            val memory = allMemories()
+            val key = prefs.getString("ai_key","").orEmpty()
+            val kids = prefs.getBoolean("kids_mode",false)
+            addMessage("Thinking…",false)
+            Thread {
+                val answer = try { Brain.ask(endpoint,key,model,snapshot,memory,kids) }
+                    catch(e:Exception) { "AI connection failed: ${e.javaClass.simpleName}. Check your provider settings and internet." }
+                runOnUiThread {
+                    val arr = messages()
+                    if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Thinking…") {
+                        arr.remove(arr.length()-1); store(arr)
+                    }
+                    showChat()
+                    addMessage(answer,false)
+                    if(prefs.getBoolean("speak",false)) tts?.speak(answer,TextToSpeech.QUEUE_FLUSH,null,"xtorin")
+                }
+            }.start()
+        } else {
+            val answer = reply(value)
+            addMessage(answer,false)
+            if(prefs.getBoolean("speak",false)) tts?.speak(answer,TextToSpeech.QUEUE_FLUSH,null,"xtorin")
+        }
     }
     private fun newChat() {
         chatId = UUID.randomUUID().toString()
@@ -203,10 +229,27 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             check.setOnCheckedChangeListener { _,checked -> prefs.edit().putBoolean(key,checked).apply() }
             list.addView(check)
         }
+        list.addView(text("AI Brain • OpenAI-compatible provider",18f,accent))
+        list.addView(text("Enter an HTTPS chat-completions URL, model ID and optional provider API key. Messages and saved memories will be sent to that provider.",12f,Color.LTGRAY))
+        fun config(label:String,key:String,secret:Boolean=false) {
+            val field=EditText(this).apply {
+                hint=label; setHintTextColor(Color.GRAY); setTextColor(Color.WHITE)
+                setSingleLine(true)
+                setText(prefs.getString(key,""))
+                if(secret) inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            list.addView(field)
+            field.setOnFocusChangeListener { _,focused -> if(!focused) prefs.edit().putString(key,field.text.toString().trim()).apply() }
+            list.addView(button("Save $label") { prefs.edit().putString(key,field.text.toString().trim()).apply(); Toast.makeText(this,"Saved",Toast.LENGTH_SHORT).show() })
+        }
+        config("HTTPS endpoint (…/chat/completions)","ai_endpoint")
+        config("Model ID","ai_model")
+        config("API key (optional)","ai_key",true)
         list.addView(text("AI response customization",18f,accent))
         toggle("Speak responses aloud","speak")
         toggle("Concise response preference","concise",true)
         list.addView(text("Safety & access",18f,accent))
+        toggle("Kids mode (local setting)","kids_mode")
         toggle("Safe AI mode preference","safe",true)
         list.addView(text("Safe mode is a local preference, not a security filter or model safeguard.",12f,Color.LTGRAY))
         list.addView(text("Memory",18f,accent))
