@@ -117,7 +117,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val model = prefs.getString("ai_model","").orEmpty().trim()
         val command = value.lowercase(Locale.ROOT)
         val offline = command in listOf("help","time","date","memories","projects","history","settings","new chat","voice") ||
-            listOf("remember ","recall ","clear memory ").any { command.startsWith(it) }
+            listOf("remember ","recall ","clear memory ","teach ","define ","relate ").any { command.startsWith(it) }
         if(endpoint.isNotEmpty() && model.isNotEmpty() && !offline) {
             val requestChatId = chatId
             val snapshot = JSONArray(messages().toString())
@@ -357,10 +357,43 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
     private fun allMemories():String = prefs.all.keys.filter { it.startsWith("memory_") }.sorted()
         .joinToString("\n") { it.removePrefix("memory_")+": "+prefs.getString(it,"") }.ifBlank { "No saved memories." }
+    private fun learnedExamples():JSONArray = try {
+        JSONArray(prefs.getString("learned_examples","[]"))
+    } catch (_:Exception) { JSONArray() }
+    private fun conceptGraph():JSONObject = try {
+        JSONObject(prefs.getString("concept_graph","{}"))
+    } catch (_:Exception) { JSONObject() }
     private fun reply(message:String):String {
         val clean=message.trim(); val lower=clean.lowercase(Locale.ROOT)
         return when {
-            lower=="help" -> "Commands: help, time, date, remember KEY = VALUE, recall KEY, memories, clear memory KEY, projects, history, settings, new chat, voice."
+            lower=="help" -> "Commands: help, time, date, remember KEY = VALUE, recall KEY, teach QUESTION => ANSWER, define WORD = MEANING, relate SUBJECT | RELATION | OBJECT, memories, projects, history, settings, new chat, voice."
+            lower.startsWith("teach ") -> {
+                val parts=clean.substring(6).split("=>",limit=2)
+                if(parts.size!=2 || parts.any { it.isBlank() }) "Use: teach QUESTION => ANSWER"
+                else {
+                    val updated=PatternLearner.learn(learnedExamples(),parts[0],parts[1])
+                    prefs.edit().putString("learned_examples",updated.toString()).apply()
+                    "Got it. I'll remember how to respond to that."
+                }
+            }
+            lower.startsWith("define ") -> {
+                val parts=clean.substring(7).split("=",limit=2)
+                if(parts.size!=2 || parts.any { it.isBlank() }) "Use: define WORD = MEANING"
+                else {
+                    val updated=ConceptMemory.define(conceptGraph(),parts[0],parts[1])
+                    prefs.edit().putString("concept_graph",updated.toString()).apply()
+                    "I've saved that definition."
+                }
+            }
+            lower.startsWith("relate ") -> {
+                val parts=clean.substring(7).split("|",limit=3)
+                if(parts.size!=3 || parts.any { it.isBlank() }) "Use: relate SUBJECT | RELATION | OBJECT"
+                else {
+                    val updated=ConceptMemory.relate(conceptGraph(),parts[0],parts[1],parts[2])
+                    prefs.edit().putString("concept_graph",updated.toString()).apply()
+                    "I've linked those concepts."
+                }
+            }
             lower=="time" -> SimpleDateFormat("HH:mm",Locale.getDefault()).format(Date())
             lower=="date" -> SimpleDateFormat("yyyy-MM-dd",Locale.getDefault()).format(Date())
             lower.startsWith("remember ") -> {
@@ -377,7 +410,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             lower=="new chat" -> { newChat(); "New chat created." }
             lower=="voice" -> { startVoice(); "Starting speech recognition." }
             lower in listOf("hi","hello","hey") -> "Hello. Xtorin AI Mobile is operational."
-            else -> "Offline command mode is active. A language model is not connected yet. Type help for commands."
+            else -> ConversationEngine.respond(clean,messages(),learnedExamples(),conceptGraph())
         }
     }
 }
