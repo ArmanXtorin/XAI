@@ -25,6 +25,9 @@ object ConversationEngine {
             lower.startsWith("what is ") -> text.substring(8).trimEnd('?', '.', ' ')
             lower.startsWith("who is ") -> text.substring(7).trimEnd('?', '.', ' ')
             lower.startsWith("tell me about ") -> text.substring(14).trimEnd('?', '.', ' ')
+            lower.startsWith("explain ") -> text.substring(8).trimEnd('?', '.', ' ')
+            lower.startsWith("define ") -> text.substring(7).trimEnd('?', '.', ' ')
+            lower.startsWith("what are ") -> text.substring(9).trimEnd('?', '.', ' ')
             else -> ""
         }
         if (topic.isNotEmpty()) {
@@ -33,6 +36,13 @@ object ConversationEngine {
             }
         }
 
+        // Retrieve an exact stored topic, then try distinctive phrases in the question.
+        val words = lower.replace(Regex("[^\\p{L}\\p{N} ]"), " ").split(Regex("\\s+"))
+            .filter { it.length > 3 && it !in setOf("what","where","when","does","about","tell","explain","please","know") }
+        val candidates = (3 downTo 1).flatMap { n -> words.windowed(n).map { it.joinToString(" ") } }
+        for (candidate in candidates) {
+            ConceptMemory.lookup(concepts,candidate)?.let { return "From saved knowledge:\n" + it }
+        }
         val recent = (history.length() - 1 downTo 0)
             .mapNotNull { history.optJSONObject(it) }
             .firstOrNull { it.optBoolean("user") && it.optString("text") != text }
