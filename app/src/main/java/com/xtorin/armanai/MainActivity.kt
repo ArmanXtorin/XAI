@@ -118,6 +118,41 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val command = value.lowercase(Locale.ROOT)
         val offline = command in listOf("help","time","date","memories","projects","history","settings","new chat","voice") ||
             listOf("remember ","recall ","clear memory ","teach ","define ","relate ").any { command.startsWith(it) }
+        if(command.startsWith("/research ") || command.startsWith("/learn ")) {
+            val learning = command.startsWith("/learn ")
+            val topic = value.substringAfter(" ").trim()
+            if(topic.isEmpty()) { addMessage("Use /research TOPIC or /learn TOPIC",false); return }
+            val requestChatId = chatId
+            addMessage("Researching Wikipedia…",false)
+            Thread {
+                val result = try { WebKnowledge.wikipedia(topic) } catch (_:Exception) { null }
+                val answer = if(result == null)
+                    "No Wikipedia summary found. Search manually: " + WebKnowledge.googleSearchUrl(topic)
+                else {
+                    if(learning) {
+                        synchronized(prefs) {
+                            val graph = conceptGraph()
+                            ConceptMemory.define(graph,topic,result.summary + "\\nSource: " + result.source)
+                            prefs.edit().putString("concept_graph",graph.toString()).apply()
+                        }
+                    }
+                    (if(learning) "Saved locally.\\n" else "") +
+                        result.title + ": " + result.summary + "\\nSource: " + result.source +
+                        "\\nMore sources (search links, not automatically read):" +
+                        "\\nGoogle: " + WebKnowledge.googleSearchUrl(topic) +
+                        "\\nReddit: https://www.reddit.com/search/?q=" + java.net.URLEncoder.encode(topic,"UTF-8") +
+                        "\\nGitHub: https://github.com/search?q=" + java.net.URLEncoder.encode(topic,"UTF-8")
+                }
+                runOnUiThread {
+                    val arr = try { JSONArray(prefs.getString("chat_$requestChatId","[]")) } catch (_:Exception) { JSONArray() }
+                    if(arr.length()>0 && arr.optJSONObject(arr.length()-1)?.optString("text")=="Researching Wikipedia…") arr.remove(arr.length()-1)
+                    arr.put(JSONObject().put("text",answer).put("user",false))
+                    prefs.edit().putString("chat_$requestChatId",arr.toString()).apply()
+                    if(chatId==requestChatId) showChat()
+                }
+            }.start()
+            return
+        }
         if(endpoint.isNotEmpty() && model.isNotEmpty() && !offline) {
             val requestChatId = chatId
             val snapshot = JSONArray(messages().toString())
@@ -366,7 +401,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun reply(message:String):String {
         val clean=message.trim(); val lower=clean.lowercase(Locale.ROOT)
         return when {
-            lower=="help" -> "Commands: help, time, date, remember KEY = VALUE, recall KEY, teach QUESTION => ANSWER, define WORD = MEANING, relate SUBJECT | RELATION | OBJECT, memories, projects, history, settings, new chat, voice."
+            lower=="help" -> "Commands: /research TOPIC, /learn TOPIC, help, time, date, remember KEY = VALUE, recall KEY, teach QUESTION => ANSWER, define WORD = MEANING, relate SUBJECT | RELATION | OBJECT, memories, projects, history, settings, new chat, voice."
             lower.startsWith("teach ") -> {
                 val parts=clean.substring(6).split("=>",limit=2)
                 if(parts.size!=2 || parts.any { it.isBlank() }) "Use: teach QUESTION => ANSWER"
