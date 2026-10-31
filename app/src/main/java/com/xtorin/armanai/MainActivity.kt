@@ -120,7 +120,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             listOf("remember ","recall ","clear memory ","teach ","define ","relate ").any { command.startsWith(it) }
         if(command=="/random learn" || command=="/randomlearn") {
             val topics=listOf("Solar System","Cell biology","Ancient Egypt","Computer science","Photosynthesis","Ocean","Mathematics","World Wide Web","Evolution","Music theory","Geology","History of astronomy")
-            val topic=topics.random()
+            val topic=nextLearningTopic()
             researchTopic(topic,true)
             return
         }
@@ -184,7 +184,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     val graph=conceptGraph()
                     ConceptMemory.define(graph,found.title,found.summary)
                     related.forEach { ConceptMemory.relate(graph,found.title,"related category",it) }
-                    prefs.edit().putString("concept_graph",graph.toString())
+                    val meta=try { JSONObject(prefs.getString("knowledge_meta","{}")) } catch (_:Exception) { JSONObject() }
+                    meta.put(found.title.lowercase(Locale.ROOT),JSONObject().put("source",found.source).put("savedAt",System.currentTimeMillis()).put("status","Unverified summary"))
+                    prefs.edit().putString("knowledge_meta",meta.toString()).putString("concept_graph",graph.toString())
                         .putString("research_"+found.title.lowercase(Locale.ROOT).take(100),
                             found.summary+"\nSource: "+found.source).apply()
                 }
@@ -207,6 +209,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         }.start()
     }
+    private fun nextLearningTopic():String {
+        val known=conceptGraph().optJSONObject("concepts") ?: JSONObject()
+        val edges=conceptGraph().optJSONArray("relations") ?: JSONArray()
+        val candidates=mutableListOf<String>()
+        for(i in 0 until edges.length()) {
+            val topic=edges.optJSONObject(i)?.optString("to").orEmpty()
+            if(topic.isNotBlank() && !known.has(topic.lowercase(Locale.ROOT))) candidates.add(topic)
+        }
+        val starters=listOf("Solar System","Cell biology","Ancient Egypt","Computer science","Photosynthesis","Ocean","Mathematics","Evolution","Music theory","Geology")
+        candidates.addAll(starters.filter { !known.has(it.lowercase(Locale.ROOT)) })
+        return candidates.distinct().randomOrNull() ?: starters.random()
+    }
     private fun showLearned() {
         screen("Learned knowledge")
         val list=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
@@ -214,15 +228,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         root.addView(scrollView,LinearLayout.LayoutParams(-1,0,1f))
         val graph=conceptGraph().optJSONObject("concepts") ?: JSONObject()
         val names=graph.keys().asSequence().toList().sorted()
-        list.addView(text("Stored concepts: "+names.size+" • Taught examples: "+learnedExamples().length(),13f,Color.LTGRAY))
+        val meta=try { JSONObject(prefs.getString("knowledge_meta","{}")) } catch (_:Exception) { JSONObject() }
+        val links=conceptGraph().optJSONArray("relations")?.length() ?: 0
+        val bytes=prefs.getString("concept_graph","{}").orEmpty().toByteArray().size
+        list.addView(text("Concepts: "+names.size+" • Connections: "+links+" • Examples: "+learnedExamples().length()+" • Knowledge: "+(bytes/1024)+" KB",13f,Color.LTGRAY))
         if(names.isEmpty()) list.addView(text("No concepts saved yet. Use /learn TOPIC."))
         names.forEach { name ->
             list.addView(button(name) {
-                info(name,graph.optString(name)+"\\n\\nSource information is saved only when imported from research.")
+                val entry=meta.optJSONObject(name)
+                val source=entry?.optString("source").orEmpty().ifBlank { "User-defined / unknown" }
+                val saved=entry?.optLong("savedAt",0L) ?: 0L
+                val date=if(saved>0) SimpleDateFormat("yyyy-MM-dd",Locale.getDefault()).format(Date(saved)) else "Unknown"
+                info(name,graph.optString(name)+"\n\nSource: "+source+"\nSaved: "+date+"\nVerification: "+(entry?.optString("status") ?: "Not verified"))
             })
         }
         list.addView(button("Learn a random topic") { showChat(); researchTopic(
-            listOf("Solar System","Cell biology","Ancient Egypt","Computer science","Photosynthesis","Ocean").random(),true)
+            nextLearningTopic(),true)
         })
     }
     private fun newChat() {
