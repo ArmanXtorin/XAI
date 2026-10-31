@@ -135,6 +135,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             addMessage(prefs.getString("research_"+topic,null) ?: "Nothing saved for that topic yet.",false)
             return
         }
+        val factual=command.startsWith("what is ") || command.startsWith("who is ") ||
+            command.startsWith("tell me about ") || command.startsWith("explain ")
+        if(factual && !offline) {
+            val known=ConversationEngine.respond(value,messages(),learnedExamples(),conceptGraph())
+            if(known.startsWith("Here") || known.startsWith("From saved knowledge:")) {
+                addMessage(known,false)
+                return
+            }
+        }
         if(endpoint.isNotEmpty() && model.isNotEmpty() && !offline) {
             val requestChatId = chatId
             val snapshot = JSONArray(messages().toString())
