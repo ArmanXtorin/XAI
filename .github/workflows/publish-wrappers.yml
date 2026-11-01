@@ -1,0 +1,80 @@
+name: Publish Xtorin AI Windows and Android downloads
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-wrappers.yml'
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build Windows EXEs
+        run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-executables
+          path: windows/dist/*.exe
+          if-no-files-found: error
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Configure Android SDK
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" --licenses || true
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build Android debug APK
+        working-directory: android
+        run: gradle :app:assembleDebug --no-daemon
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk Xtorin-AI-Android-v1.0-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: Xtorin-AI-Android-v1.0-debug.apk
+          if-no-files-found: error
+  publish:
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          merge-multiple: true
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0-wrappers
+          name: Xtorin AI Desktop and Android v1.0.0
+          body: |
+            Windows x64: Installer and portable EXE.
+            Android: Debug APK for testing, not a production-signed release.
+            Both wrappers load the live Xtorin AI website and require internet access.
+            Windows executables are unsigned. Google login and media permissions are not yet fully verified.
+          files: release-files/*
+          fail_on_unmatched_files: true
+          overwrite_files: true
